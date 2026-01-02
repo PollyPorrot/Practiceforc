@@ -13,3 +13,8 @@ add_executable(test_counter
     tests/test_counter.cpp
     src/Counter.cpp
 )
+
+add_executable(test_stringlite
+    tests/test_stringlite.cpp
+    src/StringLite.cpp
+)
