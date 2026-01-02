@@ -18,3 +18,8 @@ add_executable(test_stringlite
     tests/test_stringlite.cpp
     src/StringLite.cpp
 )
+
+add_executable(test_repo
+    tests/test_repo.cpp
+    src/StudentRepo.cpp
+)
