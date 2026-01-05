@@ -23,3 +23,22 @@ add_executable(test_repo
     tests/test_repo.cpp
     src/StudentRepo.cpp
 )
+
+add_executable(tcp_client
+    net/tcp_client.cpp
+)
+
+add_executable(tcp_server
+    net/tcp_server.cpp
+)
+
+add_library(msgcodec STATIC 
+    src/net/MsgCodec.cpp
+)
+
+target_include_directories(msgcodec PUBLIC 
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(tcp_server PRIVATE msgcodec)
+target_link_libraries(tcp_client PRIVATE msgcodec)
