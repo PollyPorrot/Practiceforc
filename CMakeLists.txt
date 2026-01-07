@@ -32,13 +32,16 @@ add_executable(tcp_server
     net/tcp_server.cpp
 )
 
+#编译静态库名字叫msgcodec
 add_library(msgcodec STATIC 
     src/net/MsgCodec.cpp
 )
 
+# 去哪找，不仅自己能用，链接自己的也能用
 target_include_directories(msgcodec PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# 链接到对应的可执行文件
 target_link_libraries(tcp_server PRIVATE msgcodec)
 target_link_libraries(tcp_client PRIVATE msgcodec)
