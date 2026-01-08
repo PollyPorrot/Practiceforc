@@ -80,7 +80,7 @@ int main(){
         return 0;
     }
     std::cout << "server got: " << msg << std::endl;
-    if (!net::sendMsg(conn_fd, "reply from server")) {
+    if (!net::sendMsg(conn_fd, "reply from server\n")) {
         std::cout << "sendMsg failed\n";
     }
 

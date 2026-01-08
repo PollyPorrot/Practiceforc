@@ -49,7 +49,7 @@ namespace net {
     }
 
     bool sendMsg(int fd,const std::string& msg){
-        uint32_t len=static_cast<uint32_t>(msg.size());
+        uint32_t len=20;
         uint32_t netLen=htonl(len);
         if(!sendAll(fd, &netLen, sizeof(netLen))){
             return false;

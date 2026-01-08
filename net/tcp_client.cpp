@@ -53,6 +53,7 @@ int main(){
         std::cout << "sendMsg failed\n";
         return 1;
     }
+    send(fd, "a", 1, 0);
     std::string reply;
     if (!net::recvMsg(fd, reply)) {
         std::cout << "recvMsg failed\n";

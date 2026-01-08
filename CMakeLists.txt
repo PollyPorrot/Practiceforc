@@ -45,3 +45,12 @@ target_include_directories(msgcodec PUBLIC
 # 链接到对应的可执行文件
 target_link_libraries(tcp_server PRIVATE msgcodec)
 target_link_libraries(tcp_client PRIVATE msgcodec)
+
+# 如果想直接在外面编译不用cmake全部编译一遍的话
+# g++ net/epoll_server.cpp build/libmsgcodec.a -I include -o epoll_server
+# 把库直接放在前面，然后再跟上源在哪里
+add_executable(epoll_server 
+    net/epoll_server.cpp
+)
+
+target_link_libraries(epoll_server PRIVATE msgcodec)
