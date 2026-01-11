@@ -16,6 +16,7 @@
 #include <vector>
 #include <string>
 
+#include "utils/UniqueFd.h"
 #include "utils/FdGuard.h"
 // #include "net/MsgCodec.h"
 
@@ -29,7 +30,7 @@ enum class PopResult{
 };
 
 struct Conn{
-    FdGuard fd;
+    std::unique_ptr<int, CloseDeleter> fd;
 
     std::vector<char> inbuf;
     std::vector<char> outbuf;
@@ -43,7 +44,9 @@ struct Conn{
     std::time_t payload_since = 0;
     uint32_t expected_len = 0;   // 已解析出的 payload 长度
 
-    explicit Conn(int rawfd) : fd(rawfd) {}
+    // explicit Conn(int rawfd) : fd() {}
+    explicit Conn(int rawfd) : fd(new int(rawfd)) {}
+    // explicit Conn(UniqueFd&& ufd) : fd(std::move(ufd)) {}
     Conn() = default;
     Conn(Conn&&) noexcept =default;
     Conn& operator=(Conn&&) noexcept =default;
@@ -108,18 +111,20 @@ static PopResult tryPopMsg(Conn& c,std::string& msg ){
 
 int main(){
     // int listen_fd=socket(AF_INET,SOCK_STREAM, 0);
-    std::unique_ptr<int> listen_fd=std::make_unique<int>(socket(AF_INET, SOCK_STREAM, 0));
+    // std::unique_ptr<int> listen_fd=std::make_unique<int>(socket(AF_INET, SOCK_STREAM, 0));
 
+    UniqueFd listen_fd = make_fd(socket(AF_INET, SOCK_STREAM, 0));
+    // UniqueFd listen_fd = std::make_unique<int, CloseDeleter>(socket(AF_INET, SOCK_STREAM, 0));
     if(*listen_fd<0){
         perror("socket");
         return 1;
     }
 
-    int flags = fcntl(*listen_fd.get(), F_GETFL, 0);
-    fcntl(*listen_fd.get(), F_SETFL, flags | O_NONBLOCK);
+    int flags = fcntl(*listen_fd, F_GETFL, 0);
+    fcntl(*listen_fd, F_SETFL, flags | O_NONBLOCK);
 
     int opt=1;
-    setsockopt(*listen_fd.get(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    setsockopt(*listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
 
     sockaddr_in server{};
@@ -127,20 +132,21 @@ int main(){
     server.sin_port=htons(8080);
     server.sin_addr.s_addr=htonl(INADDR_ANY);
 
-    if(bind(*listen_fd.get(), (sockaddr*)&server, sizeof(server))<0){
+    if(bind(*listen_fd, (sockaddr*)&server, sizeof(server))<0){
         perror("bind");
-        close(*listen_fd.get());
+        close(*listen_fd);
         return 1;
     }
-    if(listen(*listen_fd.get(), 5)<0){
+    if(listen(*listen_fd, 5)<0){
         perror("listen");
-        close(*listen_fd.get());
+        close(*listen_fd);
         return 1;
     }
 
     // int epfd = epoll_create1(0);
 
-    std::unique_ptr<int> epfd =std::make_unique<int>(epoll_create1(0));
+    // std::unique_ptr<int> epfd =std::make_unique<int>(epoll_create1(0));
+    UniqueFd epfd = make_fd(epoll_create1(0));
     if(*epfd<0){
         perror("epoll create");
         return 1;
@@ -148,7 +154,8 @@ int main(){
 
     // int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
 
-    std::unique_ptr<int> tfd =std::make_unique<int>(timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC));
+    // std::unique_ptr<int> tfd =std::make_unique<int>(timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC));
+    UniqueFd tfd  = make_fd(timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC));
     if(*tfd<0){
         perror("timerfd_create");
         return 1;
@@ -158,30 +165,30 @@ int main(){
     its.it_interval.tv_sec=1;  // 周期
     its.it_value.tv_sec=1;     // 第一次出发时间
     
-    if(timerfd_settime(*tfd.get(), 0, &its, nullptr)<0){
+    if(timerfd_settime(*tfd, 0, &its, nullptr)<0){
         perror("timerfd_settime");
         return 1;
     }
 
     epoll_event tev{};
     tev.events=EPOLLIN;
-    tev.data.fd=*tfd.get();
-    if(epoll_ctl(*epfd.get(), EPOLL_CTL_ADD, *tfd.get(), &tev)<0){
+    tev.data.fd=*tfd;
+    if(epoll_ctl(*epfd, EPOLL_CTL_ADD, *tfd, &tev)<0){
         perror("epoll_ctl timerfd");
         return 1;
     }
 
     epoll_event ev{};
     ev.events=EPOLLIN;
-    ev.data.fd=*listen_fd.get();
-    if(epoll_ctl(*epfd.get(), EPOLL_CTL_ADD, *listen_fd.get(), &ev)<0){
+    ev.data.fd=*listen_fd;
+    if(epoll_ctl(*epfd, EPOLL_CTL_ADD, *listen_fd, &ev)<0){
         perror("epoll_ctl");
         return 1;
     }
     epoll_event events[10];
     int size =sizeof(events)/sizeof(events[0]);
     while(1){
-        int n=epoll_wait(*epfd.get(), events, size, -1);
+        int n=epoll_wait(*epfd, events, size, -1);
         if(n<0){
             perror("epoll_wait");
             return 1;
@@ -194,7 +201,7 @@ int main(){
 
         //     if(isWaitingTimeOut(c, now, 5)){
         //         std::cout<<"timeout: closing fd= "<<fd<<std::endl;
-        //         epoll_ctl(*epfd.get(), EPOLL_CTL_DEL, fd, nullptr);
+        //         epoll_ctl(*epfd, EPOLL_CTL_DEL, fd, nullptr);
         //         close(fd);
         //         it=conns.erase(it);
         //     }else{
@@ -203,9 +210,9 @@ int main(){
         // }
 
         for(int i=0;i<n;i++){
-            if(events[i].data.fd==*tfd.get()){
+            if(events[i].data.fd==*tfd){
                 uint64_t exp;
-                ssize_t r = read(*tfd.get(), &exp, sizeof(exp));
+                ssize_t r = read(*tfd, &exp, sizeof(exp));
                 // (void)r;                                   // 告诉编译器，不会用这个变量
                 if(r<0 && errno !=EAGAIN){
                     perror("read timer");
@@ -215,31 +222,37 @@ int main(){
                 for(auto it=conns.begin();it!=conns.end();){
                     int fd=it->first;
                     Conn& c=it->second;
-                    ++it;
-                    if(c.waiting_payload && (now -c.payload_since)>=5){
+                    bool need_close = false;
+                    if (c.waiting_payload && (now - c.payload_since) >= 5) {
                         std::cout<<"timeout: closing fd= "<<fd<<"-waiting payload len="<<c.expected_len<<std::endl;
-                        epoll_ctl(*epfd.get(), EPOLL_CTL_DEL, fd, nullptr);
-                        close(fd);
-                        it=conns.erase(it);
-                    }else if (c.waiting_header && (now - c.header_since)>=15) {
+                        need_close = true;
+                    } else if (c.waiting_header && (now - c.header_since) >= 15) {
                         std::cout<<"timeout: closing fd= "<<fd<<"-incomplete header"<<std::endl;
-                        epoll_ctl(*epfd.get(), EPOLL_CTL_DEL, fd, nullptr);
-                        close(fd);
-                        it=conns.erase(it);
-                    }else{
+                        need_close = true;
+                    }
+
+                    if (need_close) {
+                        // 从 epoll 中删除，无需手动 close（FdGuard 析构时自动关闭）
+                        epoll_ctl(*epfd, EPOLL_CTL_DEL, fd, nullptr);
+                        // erase 返回下一个有效的迭代器，更新 it
+                        it = conns.erase(it);
+                    } else {
+                        // 无需删除，自增迭代器
                         ++it;
                     }
                 }
                 continue;
-            }else if(events[i].data.fd==*listen_fd.get()){
+            }else if(events[i].data.fd==*listen_fd){
                 // 用while循环进行多次连接，避免一次epoll可能发来很多次连接
                 while (true) {
                     sockaddr_in client{};
                     socklen_t client_len = sizeof(client);
-                    // int conn_fd = accept(*listen_fd.get(), (sockaddr*)&client, &client_len);
-                    std::unique_ptr<int> conn_fd =std::make_unique<int>(accept(*listen_fd.get(), (sockaddr*)&client, &client_len));
-
-                    if (*conn_fd < 0) {
+                    // int conn_fd = accept(*listen_fd, (sockaddr*)&client, &client_len);
+                    // std::unique_ptr<int> conn_fd =std::make_unique<int>(accept(*listen_fd, (sockaddr*)&client, &client_len));
+                    // UniqueFd conn_fd = std::make_unique<int>(accept(*listen_fd, (sockaddr*)&client, &client_len));
+                    // UniqueFd conn_fd = std::unique_ptr<int, CloseDeleter>(new int(accept(*listen_fd, (sockaddr*)&client, &client_len)));
+                    int conn_fd=accept(*listen_fd, (sockaddr*)&client, &client_len);
+                    if (conn_fd < 0) {
                         if (errno == EAGAIN || errno == EWOULDBLOCK) {
                             // 这一波连接都接完了
                             break;
@@ -252,36 +265,36 @@ int main(){
                     }
 
                     // conn_fd 设置非阻塞
-                    int flags = fcntl(*conn_fd.get(), F_GETFL, 0);
-                    fcntl(*conn_fd.get(), F_SETFL, flags | O_NONBLOCK);
+                    int flags = fcntl(conn_fd, F_GETFL, 0);
+                    fcntl(conn_fd, F_SETFL, flags | O_NONBLOCK);
 
                     printf("Client connected\n");
 
-                    conns[*conn_fd.get()] = Conn{};
+                    // conns[raw] = Conn{};
 
                     epoll_event cev{};
                     cev.events = EPOLLIN;
-                    cev.data.fd = *conn_fd.get();
+                    cev.data.fd = conn_fd;
 
-                    if (epoll_ctl(*epfd.get(), EPOLL_CTL_ADD, *conn_fd.get(), &cev) < 0) {
+                    if (epoll_ctl(*epfd, EPOLL_CTL_ADD, conn_fd, &cev) < 0) {
                         perror("epoll_ctl conn_fd");
-                        close(*conn_fd.get());
+                        close(conn_fd);
                         continue;
                     }
-
+                    conns.emplace(conn_fd,Conn(conn_fd));
 
                 }
             }else if (events[i].events & EPOLLIN) {
                 int conn_fd = events[i].data.fd;
                 if (events[i].events & (EPOLLERR | EPOLLHUP)) {
-                    closeConn(*epfd.get(), conn_fd);
+                    closeConn(*epfd, conn_fd);
                     continue;
                 }
 
                 // std::string msg;
                 // if (!net::recvMsg(conn_fd, msg)) {
                 //     // 出错或对端关闭：从 epoll 删除 + 关闭
-                //     epoll_ctl(*epfd.get(), EPOLL_CTL_DEL, conn_fd, nullptr);
+                //     epoll_ctl(*epfd, EPOLL_CTL_DEL, conn_fd, nullptr);
                 //     close(conn_fd);
                 //     continue;
                 // }
@@ -325,7 +338,7 @@ int main(){
                                 epoll_event ev{};
                                 ev.events =EPOLLIN | EPOLLOUT;
                                 ev.data.fd=conn_fd;
-                                epoll_ctl(*epfd.get(), EPOLL_CTL_MOD, conn_fd, &ev);
+                                epoll_ctl(*epfd, EPOLL_CTL_MOD, conn_fd, &ev);
                                 
                                 continue;
                             }
@@ -335,16 +348,16 @@ int main(){
                             }
 
                             std::cout<<"bad proto: closing fd = "<<conn_fd<<std::endl;
-                            closeConn(*epfd.get(), conn_fd);
+                            closeConn(*epfd, conn_fd);
                             break;
                         }
                     }
                     else if (n == 0) {
                         // 对端关闭
-                        // epoll_ctl(*epfd.get(), EPOLL_CTL_DEL, conn_fd, nullptr);
+                        // epoll_ctl(*epfd, EPOLL_CTL_DEL, conn_fd, nullptr);
                         // conns.erase(conn_fd);
                         // close(conn_fd);
-                        closeConn(*epfd.get(), conn_fd);
+                        closeConn(*epfd, conn_fd);
                         break;
                     }
                     else {
@@ -356,24 +369,24 @@ int main(){
                             continue;
                         }
                         // 真错误
-                        // epoll_ctl(*epfd.get(), EPOLL_CTL_DEL, conn_fd, nullptr);
+                        // epoll_ctl(*epfd, EPOLL_CTL_DEL, conn_fd, nullptr);
                         // conns.erase(conn_fd);
                         // close(conn_fd);
-                        closeConn(*epfd.get(),conn_fd);
+                        closeConn(*epfd,conn_fd);
                         break;
                     }
                 }
 
 
                 // if (!net::sendMsg(conn_fd, "reply from server\n")) {
-                //     epoll_ctl(*epfd.get(), EPOLL_CTL_DEL, conn_fd, nullptr);
+                //     epoll_ctl(*epfd, EPOLL_CTL_DEL, conn_fd, nullptr);
                 //     close(conn_fd);
                 //     continue;
                 // }
             }else if(events[i].events & EPOLLOUT){
                 int conn_fd=events[i].data.fd;
                 if (events[i].events & (EPOLLERR | EPOLLHUP)) {
-                    closeConn(*epfd.get(), conn_fd);
+                    closeConn(*epfd, conn_fd);
                     continue;
                 }
 
@@ -399,10 +412,10 @@ int main(){
                             continue;
                         }
 
-                        // epoll_ctl(*epfd.get(), EPOLL_CTL_DEL, conn_fd, nullptr);
+                        // epoll_ctl(*epfd, EPOLL_CTL_DEL, conn_fd, nullptr);
                         // conns.erase(conn_fd);
                         // close(conn_fd);
-                        closeConn(*epfd.get(), conn_fd);
+                        closeConn(*epfd, conn_fd);
                         break;
                     }
                 }
@@ -412,14 +425,11 @@ int main(){
                     epoll_event ev{};
                     ev.events=EPOLLIN;
                     ev.data.fd=conn_fd;
-                    epoll_ctl(*epfd.get(), EPOLL_CTL_MOD, conn_fd, &ev);
+                    epoll_ctl(*epfd, EPOLL_CTL_MOD, conn_fd, &ev);
                 }
             }
 
         }
     }
-    close(*tfd.get());
-    close(*listen_fd.get());
-    close(*epfd.get());
     return 0;
 }
